@@ -1,0 +1,113 @@
+#!/bin/sh 
+#
+# Program: Verify that a DNS server is answering queries <dns-check>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.0
+#
+# Revision History:
+#
+#  Version 1.0
+#    Initial Release
+#
+# Last Updated: 08-14-2006
+#
+# Purpose:
+#   The dns-check shell script can be used to verify that a DNS server is 
+#   reponding to queries. If a server fails to resolve a name through DNS,
+#   an E-mail is sent to the administrator listed in the $ADMIN variable.
+#
+# License:
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Installation:
+#   Copy the shell script to a suitable location
+#
+# Usage:
+#   dns-check takes a a file that contains one or more entries
+#   in the following format:
+#         DNS_SERVER_IP  DNS_ENTRY  RECORD_TYPE
+#
+# Example:
+#   $ cat dns-check-servers
+#   192.168.1.1 mail.fooby.net A
+#
+#   $ dns-check -f dns-check-servers
+
+# Default user to send E-mail to
+ADMIN="root"
+
+# Paths to various binaries
+DIG=$(which dig)
+GREP=$(which grep)
+LOGGER=$(which logger)
+MAIL=$(which mailx)
+
+# Useful functions
+usage () {
+        echo "Usage: $0 [ -e EMAIL_ADDRESS ] -f LIST OF SERVERS"
+        echo "       -e address   : address to send alarms to"
+        echo "       -f site file : file with list of sites and record types"
+}
+
+# If no options are provided, print a help screen
+if [ $# -eq 0 ]
+then
+        usage
+        exit 0
+fi
+
+# Parse the options that are passed to the script
+while getopts e:f: option
+do
+        case "${option}"
+        in
+                e) ADMIN=${OPTARG} ;;
+                f) SITES=${OPTARG} ;;
+                \?) usage
+                    exit 1;;
+        esac
+done
+
+# Check to make sure the utilities are present
+if [ ! -f ${DIG} ] || [ ! -f ${MAIL} ] || [ ! -f ${LOGGER} ] || [ ! -f ${GREP} ] 
+then
+        echo "ERROR: Cannot find the dig, mail, logger or grep utility"
+        usage
+        exit 1
+fi
+
+# Verify that a file was passed as an argument
+if [ ! -f ${SITES}  ]
+then
+        echo "ERROR: No options specified"
+        usage
+        exit 1
+fi
+
+# Cycle through the file and send E-mail if a server isn't functioning.
+cat ${SITES} | while read SERVER RECORD TYPE
+do
+        # Make sure all entries have three values listed
+        if [ "${SERVER}" = "" ] || [ "${RECORD}" = "" ] || [ "${TYPE}" = "" ]
+        then
+                echo "ERROR: Trouble processing \${SERVER}\, \${RECORD} or \${TYPE}"
+                exit 1
+        fi
+
+        # Grab the specified record from the server, and make sure it returns valid data.
+        ${DIG} @${SERVER} ${RECORD} ${TYPE} > /dev/null 2>&1 
+
+        # See if the return code is zero.
+        if [ $? -ne 0 ]
+        then
+            ${LOGGER} -p daemon.notice "Unable to resolve ${RECORD} on server ${SERVER}"
+            echo "Unable to resolve ${RECORD} on server ${SERVER}" \
+                 | ${MAIL} -s "Unable to resolve ${RECORD} on server ${SERVER}" ${ADMIN}
+        fi
+done
+
+exit 0
